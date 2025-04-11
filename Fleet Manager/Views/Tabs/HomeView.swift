@@ -8,6 +8,7 @@ struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @AppStorage("userId") private var userId = ""
     @AppStorage("isUserRegistered") private var isUserRegistered = false
+    @EnvironmentObject private var tabSelection: TabSelection
     
     @Query private var users: [User]
     @Query private var shipAssignments: [ShipAssignment]
@@ -94,6 +95,7 @@ struct HomeView: View {
         VStack(spacing: 15) {
             HStack {
                 VStack(alignment: .leading, spacing: 8) {
+                    
                     Text("Welcome, \(user.name ?? "User")")
                         .font(.title2)
                         .bold()
@@ -189,7 +191,7 @@ struct HomeView: View {
             )
             
             ActionCard(
-                title: "Switch to Land Status",
+                title: "Complete Contract",
                 subtitle: "Record that you've completed your contract",
                 icon: "house.fill",
                 iconColor: .green,
@@ -197,12 +199,12 @@ struct HomeView: View {
             )
             
             ActionCard(
-                title: "Find Replacement",
-                subtitle: "Search for potential reliver",
+                title: "Find Reliever",
+                subtitle: "Search for potential reliever",
                 icon: "person.2.fill",
                 iconColor: .orange,
                 action: { 
-                    // This will take them to the matches tab
+                    tabSelection.selectedTab = .matches
                 }
             )
         }
@@ -219,7 +221,7 @@ struct HomeView: View {
             )
             
             ActionCard(
-                title: "Join a Ship",
+                title: "Start Contract",
                 subtitle: "Record that you're joining a vessel",
                 icon: "ferry.fill",
                 iconColor: .blue,
@@ -227,15 +229,142 @@ struct HomeView: View {
             )
             
             ActionCard(
-                title: "Find Reliver",
-                subtitle: "Search for available Reliver",
+                title: "Find Ship",
+                subtitle: "Search for available reliever",
                 icon: "binoculars.fill",
                 iconColor: .orange,
                 action: {
-                    // This will take them to the matches tab
+                    tabSelection.selectedTab = .matches
                 }
             )
         }
+    }
+    
+    private func calculateShipProgress(assignment: ShipAssignment) -> (completed: Int, remaining: Int, progress: Double)? {
+        guard let onboardDate = assignment.dateOfOnboard,
+              let releaseDate = assignment.expectedReleaseDate else {
+            return nil
+        }
+        
+        let totalDays = Calendar.current.dateComponents([.day], from: onboardDate, to: releaseDate).day ?? 0
+        let completedDays = Calendar.current.dateComponents([.day], from: onboardDate, to: Date()).day ?? 0
+        let remainingDays = max(0, totalDays - completedDays)
+        let progress = totalDays > 0 ? Double(completedDays) / Double(totalDays) : 0.0
+        
+        return (completedDays, remainingDays, progress)
+    }
+    
+    private func calculateLandDays(assignment: LandAssignment) -> (totalDays: Int, financialYearDays: Int)? {
+        guard let dateHome = assignment.dateHome else {
+            return nil
+        }
+        
+        // Calculate total days on land
+        let totalDays = Calendar.current.dateComponents([.day], from: dateHome, to: Date()).day ?? 0
+        
+        // Calculate days in current financial year (April 1 to March 31)
+        let calendar = Calendar.current
+        let currentDate = Date()
+        let currentYear = calendar.component(.year, from: currentDate)
+        let currentMonth = calendar.component(.month, from: currentDate)
+        
+        let financialYearStart: Date
+        if currentMonth >= 4 {
+            // Current financial year started in April of current year
+            financialYearStart = calendar.date(from: DateComponents(year: currentYear, month: 4, day: 1))!
+        } else {
+            // Current financial year started in April of previous year
+            financialYearStart = calendar.date(from: DateComponents(year: currentYear - 1, month: 4, day: 1))!
+        }
+        
+        let financialYearDays = calendar.dateComponents([.day], from: max(dateHome, financialYearStart), to: currentDate).day ?? 0
+        
+        return (totalDays, financialYearDays)
+    }
+    
+    private func DaysProgressView(assignment: Any) -> some View {
+        VStack(alignment: .leading, spacing: 15) {
+            if let shipAssignment = assignment as? ShipAssignment,
+               let progress = calculateShipProgress(assignment: shipAssignment) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Contract Progress")
+                        .font(.headline)
+                    
+                    // Progress bar
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Rectangle()
+                                .frame(width: geometry.size.width, height: 8)
+                                .opacity(0.3)
+                                .foregroundColor(Color(.systemGray4))
+                            
+                            Rectangle()
+                                .frame(width: min(CGFloat(progress.progress) * geometry.size.width, geometry.size.width), height: 8)
+                                .foregroundColor(.blue)
+                        }
+                        .cornerRadius(4)
+                    }
+                    .frame(height: 8)
+                    
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text("Days Completed")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("\(progress.completed)")
+                                .font(.title2)
+                                .bold()
+                        }
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .trailing) {
+                            Text("Days Remaining")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("\(progress.remaining)")
+                                .font(.title2)
+                                .bold()
+                        }
+                    }
+                }
+            } else if let landAssignment = assignment as? LandAssignment,
+                      let days = calculateLandDays(assignment: landAssignment) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Days on Land")
+                        .font(.headline)
+                    
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text("Total Days")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("\(days.totalDays)")
+                                .font(.title2)
+                                .bold()
+                        }
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .trailing) {
+                            Text("Financial Year")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("\(days.financialYearDays)")
+                                .font(.title2)
+                                .bold()
+                        }
+                    }
+                    
+                    Text("Financial Year: April 1 to March 31")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding()
+        .background(Color(.systemGray6))
+        .cornerRadius(15)
     }
     
     private func shipAssignmentCard() -> some View {
@@ -271,11 +400,14 @@ struct HomeView: View {
                         Text("Contract: \(assignment.contractLength) months")
                             .font(.caption)
                         
-                        Text("Expected Release: \(assignment.expectedReleaseDate.formatted(date: .abbreviated, time: .omitted))")
+                        Text("Expected Release: \(assignment.expectedReleaseDate!.formatted(date: .abbreviated, time: .omitted))")
                             .font(.caption)
                             .foregroundColor(.blue)
                     }
                 }
+                
+                // Add the progress view
+                DaysProgressView(assignment: assignment)
                 
                 Text("Status: \(assignment.isPublic ? "Public" : "Private")")
                     .font(.caption)
@@ -332,6 +464,9 @@ struct HomeView: View {
                         }
                     }
                 }
+                
+                // Add the progress view
+                DaysProgressView(assignment: assignment)
                 
                 Text("Status: \(assignment.isPublic ? "Public" : "Private")")
                     .font(.caption)

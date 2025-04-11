@@ -13,7 +13,7 @@ struct LandFormView: View {
     
     @State private var dateHome = Date()
     @State private var expectedJoiningDate = Date().addingTimeInterval(60*60*24*30) // Default to 1 month
-    @State private var fleetType = ""
+    @State private var selectedFleetType = AppConstants.fleetTypes[0]
     @State private var lastVessel = ""
     @State private var email = ""
     @State private var mobileNumber = ""
@@ -21,6 +21,7 @@ struct LandFormView: View {
     @State private var showingError = false
     @State private var errorMessage = ""
     @State private var isSaving = false
+    @State private var company = AppConstants.defaultCompany
     
     @Environment(\.dismiss) private var dismiss
     
@@ -29,9 +30,18 @@ struct LandFormView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(header: Text("Vessel Information")) {
+                Section(header: Text("Last Vessel Information")) {
                     TextField("Last Vessel", text: $lastVessel)
-                    TextField("Fleet Type", text: $fleetType)
+                    
+                    Picker("Fleet Type", selection: $selectedFleetType) {
+                        ForEach(AppConstants.fleetTypes, id: \.self) { type in
+                            Text(type).tag(type)
+                        }
+                    }
+                    
+                    TextField("Company", text: $company)
+                        .disabled(true)
+                        .foregroundColor(.secondary)
                 }
                 
                 Section(header: Text("Date Information")) {
@@ -62,7 +72,7 @@ struct LandFormView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .buttonStyle(.borderedProminent)
-                    .disabled(isSaving || lastVessel.isEmpty || fleetType.isEmpty)
+                    .disabled(isSaving || lastVessel.isEmpty)
                 }
             }
             .navigationTitle("Land Assignment")
@@ -98,8 +108,9 @@ struct LandFormView: View {
             switch result {
             case .success(let userData):
                 // Properly access dictionary values
-                if let fleet = userData["fleetWorking"] as? String {
-                    self.fleetType = fleet
+                if let fleet = userData["fleetWorking"] as? String, 
+                   AppConstants.fleetTypes.contains(fleet) {
+                    self.selectedFleetType = fleet
                 }
                 if let mobile = userData["mobileNumber"] as? String {
                     self.mobileNumber = mobile
@@ -138,20 +149,29 @@ struct LandFormView: View {
             user.shipAssignments = []
         }
         
+        // Update the user's fleet type to match the form selection
+        user.fleetWorking = selectedFleetType
+        
         if let existingAssignment = landAssignments.first(where: { $0.user?.userIdentifier == userId }) {
+            // Update existing land assignment
+            existingAssignment.lastVessel = lastVessel
             existingAssignment.dateHome = dateHome
             existingAssignment.expectedJoiningDate = expectedJoiningDate
-            existingAssignment.fleetType = fleetType
-            existingAssignment.lastVessel = lastVessel
             existingAssignment.email = email
             existingAssignment.mobileNumber = mobileNumber
+            existingAssignment.company = company
             existingAssignment.isPublic = isPublic
+            existingAssignment.fleetType = selectedFleetType
             
             do {
                 try modelContext.save()
                 
-                FirebaseService.shared.saveLandAssignment(landAssignment: existingAssignment) { result in
-                    handleSaveResult(result)
+                // First update the user profile to synchronize fleet info
+                FirebaseService.shared.saveUserProfile(user: user) { _ in
+                    // Then save the land assignment
+                    FirebaseService.shared.saveLandAssignment(landAssignment: existingAssignment) { result in
+                        self.handleSaveResult(result)
+                    }
                 }
             } catch {
                 errorMessage = "Failed to save: \(error.localizedDescription)"
@@ -164,22 +184,27 @@ struct LandFormView: View {
                 user: user,
                 dateHome: dateHome,
                 expectedJoiningDate: expectedJoiningDate,
-                fleetType: fleetType,
+                fleetType: selectedFleetType,
                 lastVessel: lastVessel,
                 email: email,
                 mobileNumber: mobileNumber,
-                isPublic: isPublic
+                isPublic: isPublic,
+                company: company
             )
             
             modelContext.insert(landAssignment)
             
-            // Save to local storage first
+            user.currentStatus = .onLand
+            
             do {
                 try modelContext.save()
                 
-                // Then save to Firebase
-                FirebaseService.shared.saveLandAssignment(landAssignment: landAssignment) { result in
-                    handleSaveResult(result)
+                // First update the user profile to synchronize fleet info
+                FirebaseService.shared.saveUserProfile(user: user) { _ in
+                    // Then save the land assignment
+                    FirebaseService.shared.saveLandAssignment(landAssignment: landAssignment) { result in
+                        self.handleSaveResult(result)
+                    }
                 }
             } catch {
                 errorMessage = "Failed to save locally: \(error.localizedDescription)"

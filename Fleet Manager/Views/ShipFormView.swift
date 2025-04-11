@@ -11,7 +11,7 @@ struct ShipFormView: View {
     @Binding var isPresented: Bool
     
     @State private var shipName = ""
-    @State private var company = ""
+    @State private var company = AppConstants.defaultCompany
     @State private var contractLength = 6
     @State private var rank = ""
     @State private var dateOfOnboard = Date()
@@ -22,11 +22,10 @@ struct ShipFormView: View {
     @State private var showingError = false
     @State private var errorMessage = ""
     @State private var isSaving = false
+    @State private var selectedFleetType = AppConstants.fleetTypes[0]
     
     // Same rank list as in RegisterView
-    private let ranks = ["Captain", "Chief Officer", "Second Officer", "Third Officer", 
-                         "Chief Engineer", "Second Engineer", "Third Engineer", "Fourth Engineer", 
-                         "Electrical Officer", "Deck Cadet", "Engine Cadet"]
+    private let ranks = ["Captain", "Chief Officer", "Second Officer", "Third Officer", "Chief Engineer", "Second Engineer", "Third Engineer", "Fourth Engineer", "Electrical Officer", "Deck Cadet", "Engine Cadet","Bosun","AB","OS","Oiler","Wiper","MotorMan","Fitter","Chief Cook","MSMN","Other"]
     
     var onSave: (() -> Void)? = nil
     
@@ -41,6 +40,8 @@ struct ShipFormView: View {
                     TextField("Ship Name", text: $shipName)
                     
                     TextField("Company", text: $company)
+                        .disabled(true)
+                        .foregroundColor(.secondary)
                     
                     Stepper("Contract Length: \(contractLength) months", value: $contractLength, in: 1...24)
                     
@@ -56,6 +57,12 @@ struct ShipFormView: View {
                               displayedComponents: .date)
                     
                     TextField("Port of Joining", text: $portOfJoining)
+                    
+                    Picker("Fleet Type", selection: $selectedFleetType) {
+                        ForEach(AppConstants.fleetTypes, id: \.self) { type in
+                            Text(type).tag(type)
+                        }
+                    }
                 }
                 
                 Section(header: Text("Contact Details")) {
@@ -108,6 +115,12 @@ struct ShipFormView: View {
                     if rank.isEmpty {
                         rank = user.presentRank ?? ""
                     }
+                    
+                    // Set fleet type from user's profile if it exists
+                    if let fleetWorking = user.fleetWorking, !fleetWorking.isEmpty,
+                       AppConstants.fleetTypes.contains(fleetWorking) {
+                        selectedFleetType = fleetWorking
+                    }
                 }
             }
         }
@@ -140,26 +153,35 @@ struct ShipFormView: View {
             user.landAssignments = []
         }
         
+        // Update the user's fleet type to match the form selection
+        user.fleetWorking = selectedFleetType
+        
         if let existingAssignment = shipAssignments.first(where: { $0.user?.userIdentifier == userId }) {
             // Update existing ship assignment
             existingAssignment.shipName = shipName
-            existingAssignment.company = company
-            existingAssignment.contractLength = contractLength
-            existingAssignment.rank = rank
-            existingAssignment.dateOfOnboard = dateOfOnboard
             existingAssignment.portOfJoining = portOfJoining
-            existingAssignment.email = email
+            existingAssignment.contractLength = contractLength
+            existingAssignment.dateOfOnboard = dateOfOnboard
+            existingAssignment.company = company
+            existingAssignment.fleetType = selectedFleetType
             existingAssignment.mobileNumber = mobileNumber
+            existingAssignment.email = email
             existingAssignment.isPublic = isPublic
             
             do {
                 try modelContext.save()
                 
-                FirebaseService.shared.saveShipAssignment(shipAssignment: existingAssignment) { result in
-                    handleSaveResult(result)
+                // First update the user profile to synchronize fleet info
+                FirebaseService.shared.saveUserProfile(user: user) { _ in
+                    // Then save the ship assignment
+                    FirebaseService.shared.saveShipAssignment(shipAssignment: existingAssignment) { result in
+                        DispatchQueue.main.async {
+                            self.handleSaveResult(result)
+                        }
+                    }
                 }
             } catch {
-                errorMessage = "Failed to save: \(error.localizedDescription)"
+                errorMessage = "Failed to save locally: \(error.localizedDescription)"
                 showingError = true
                 isSaving = false
             }
@@ -175,7 +197,8 @@ struct ShipFormView: View {
                 portOfJoining: portOfJoining,
                 email: email,
                 mobileNumber: mobileNumber,
-                isPublic: isPublic
+                isPublic: isPublic,
+                fleetWorking: selectedFleetType
             )
             
             modelContext.insert(shipAssignment)
@@ -185,8 +208,14 @@ struct ShipFormView: View {
             do {
                 try modelContext.save()
                 
-                FirebaseService.shared.saveShipAssignment(shipAssignment: shipAssignment) { result in
-                    handleSaveResult(result)
+                // First update the user profile to synchronize fleet info
+                FirebaseService.shared.saveUserProfile(user: user) { _ in
+                    // Then save the ship assignment
+                    FirebaseService.shared.saveShipAssignment(shipAssignment: shipAssignment) { result in
+                        DispatchQueue.main.async {
+                            self.handleSaveResult(result)
+                        }
+                    }
                 }
             } catch {
                 errorMessage = "Failed to save locally: \(error.localizedDescription)"

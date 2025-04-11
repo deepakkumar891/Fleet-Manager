@@ -23,9 +23,12 @@ struct SearchView: View {
             VStack {
                 // Search options
                 Picker("Search Type", selection: $searchOption) {
-                    Text("Seafarers").tag(SearchOption.users)
-                    Text("Ship Assignments").tag(SearchOption.shipAssignments)
-                    Text("Land Assignments").tag(SearchOption.landAssignments)
+                    
+                    //This feature to be included in coming update
+                    
+                    //Text("Seafarers").tag(SearchOption.users)
+                    Text("On Ship").tag(SearchOption.shipAssignments)
+                    Text("On Land").tag(SearchOption.landAssignments)
                 }
                 .pickerStyle(SegmentedPickerStyle())
                 .padding()
@@ -37,6 +40,8 @@ struct SearchView: View {
                     
                     TextField("Search by email, name, or vessel...", text: $searchTerm)
                         .autocapitalization(.none)
+                        .keyboardType(.default)
+                        .scrollDismissesKeyboard(.immediately)
                     
                     if !searchTerm.isEmpty {
                         Button(action: {
@@ -280,22 +285,39 @@ struct SearchView: View {
     
     private func performSearch() {
         guard !searchTerm.isEmpty else { return }
-        
+        UIApplication.shared.inputView?.endEditing(true)
         isSearching = true
         foundUsers = []
         foundShipAssignments = []
         foundLandAssignments = []
         
+        let searchLower = searchTerm.lowercased()
+        
         switch searchOption {
         case .users:
-            // Search for users by email (exact match) or name (contains)
+            // Search for users by email, name, rank, or company
             FirebaseService.shared.searchUsersByEmail(email: searchTerm) { result in
                 DispatchQueue.main.async {
                     isSearching = false
                     
                     switch result {
                     case .success(let users):
-                        foundUsers = users
+                        // Filter users based on search term
+                        foundUsers = users.filter { user in
+                            let name = (user.name ?? "").lowercased()
+                            let surname = (user.surname ?? "").lowercased()
+                            let email = (user.email ?? "").lowercased()
+                            let rank = (user.presentRank ?? "").lowercased()
+                            let company = (user.company ?? "").lowercased()
+                            let fleet = (user.fleetWorking ?? "").lowercased()
+                            
+                            return name.contains(searchLower) ||
+                                   surname.contains(searchLower) ||
+                                   email.contains(searchLower) ||
+                                   rank.contains(searchLower) ||
+                                   company.contains(searchLower) ||
+                                   fleet.contains(searchLower)
+                        }
                     case .failure(let error):
                         errorMessage = "Error searching for users: \(error.localizedDescription)"
                         showingError = true
@@ -304,23 +326,26 @@ struct SearchView: View {
             }
             
         case .shipAssignments:
-            // Search for public ship assignments
+            // Search for public ship assignments with enhanced criteria
             FirebaseService.shared.fetchPublicShipAssignments { result in
                 DispatchQueue.main.async {
                     isSearching = false
                     
                     switch result {
                     case .success(let assignments):
-                        // Filter by search term
+                        // Enhanced filtering
                         foundShipAssignments = assignments.filter { assignment in
                             let shipName = assignment.shipName?.lowercased() ?? ""
                             let rank = assignment.rank?.lowercased() ?? ""
                             let portOfJoining = assignment.portOfJoining?.lowercased() ?? ""
-                            let searchLower = searchTerm.lowercased()
+                            let company = assignment.company?.lowercased() ?? ""
+                            let fleet = assignment.user?.fleetWorking?.lowercased() ?? ""
                             
                             return shipName.contains(searchLower) ||
                                    rank.contains(searchLower) ||
-                                   portOfJoining.contains(searchLower)
+                                   portOfJoining.contains(searchLower) ||
+                                   company.contains(searchLower) ||
+                                   fleet.contains(searchLower)
                         }
                     case .failure(let error):
                         errorMessage = "Error searching for ship assignments: \(error.localizedDescription)"
@@ -330,27 +355,31 @@ struct SearchView: View {
             }
             
         case .landAssignments:
-            // Search for public land assignments
+            // Search for public land assignments with enhanced criteria
             FirebaseService.shared.fetchPublicLandAssignments { result in
                 DispatchQueue.main.async {
                     isSearching = false
                     
                     switch result {
                     case .success(let assignments):
-                        // Filter by search term
+                        // Enhanced filtering
                         foundLandAssignments = assignments.filter { assignment in
                             let fleetType = assignment.fleetType?.lowercased() ?? ""
                             let lastVessel = assignment.lastVessel?.lowercased() ?? ""
-                            let searchLower = searchTerm.lowercased()
+                            let company = assignment.company?.lowercased() ?? ""
+                            let rank = assignment.user?.presentRank?.lowercased() ?? ""
                             
                             return fleetType.contains(searchLower) ||
-                                   lastVessel.contains(searchLower)
+                                   lastVessel.contains(searchLower) ||
+                                   company.contains(searchLower) ||
+                                   rank.contains(searchLower)
                         }
                     case .failure(let error):
                         errorMessage = "Error searching for land assignments: \(error.localizedDescription)"
                         showingError = true
                     }
                 }
+                
             }
         }
     }

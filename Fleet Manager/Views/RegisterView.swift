@@ -13,9 +13,21 @@ struct RegisterView: View {
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var mobileNumber = ""
-    @State private var fleetWorking = ""
+    @State private var selectedFleetType = AppConstants.fleetTypes[0]
     @State private var presentRank = ""
-    @State private var company = ""
+    @State private var company = AppConstants.defaultCompany
+    @State private var isOnShip = false
+    
+    // Ship assignment fields
+    @State private var shipName = ""
+    @State private var portOfJoining = ""
+    @State private var contractLength = 6
+    @State private var dateOfOnboard = Date()
+    
+    // Land assignment fields
+    @State private var lastVessel = ""
+    @State private var dateHome = Date()
+    @State private var expectedJoiningDate = Date().addingTimeInterval(60*60*24*30) // Default to 1 month
     
     @State private var showAlert = false
     @State private var alertMessage = ""
@@ -23,79 +35,88 @@ struct RegisterView: View {
     
     @Query private var users: [User]
     
-    private let fleetTypes = ["Container", "Tanker", "Bulk Carrier", "RORO", "Cruise", "Offshore"]
-    private let ranks = ["Captain", "Chief Officer", "Second Officer", "Third Officer", "Chief Engineer", "Second Engineer", "Third Engineer", "Fourth Engineer", "Electrical Officer", "Deck Cadet", "Engine Cadet"]
+    private let ranks = ["Captain", "Chief Officer", "Second Officer", "Third Officer", "Chief Engineer", "Second Engineer", "Third Engineer", "Fourth Engineer", "Electrical Officer", "Deck Cadet", "Engine Cadet","Bosun","AB","OS","Oiler","Wiper","MotorMan","Fitter","Chief Cook","MSMN","Other"]
     
     var body: some View {
         NavigationStack {
             Form {
                 Section(header: Text("Personal Information")) {
                     TextField("Name", text: $name)
-                        .autocapitalization(.words)
-                    
                     TextField("Surname", text: $surname)
-                        .autocapitalization(.words)
-                    
                     TextField("Email", text: $email)
-                        .autocapitalization(.none)
                         .keyboardType(.emailAddress)
-                    
-                    SecureField("Password", text: $password)
-                    
-                    SecureField("Confirm Password", text: $confirmPassword)
-                    
+                        .autocapitalization(.none)
                     TextField("Mobile Number", text: $mobileNumber)
                         .keyboardType(.phonePad)
                 }
                 
                 Section(header: Text("Professional Information")) {
-                    VStack(alignment: .leading) {
-                        Text("Company")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        TextField("Company Name", text: $company)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                    }
-                    
-                    Picker("Fleet Type", selection: $fleetWorking) {
-                        Text("Select Fleet").tag("")
-                        ForEach(fleetTypes, id: \.self) { fleet in
-                            Text(fleet).tag(fleet)
+                    Picker("Fleet Type", selection: $selectedFleetType) {
+                        ForEach(AppConstants.fleetTypes, id: \.self) { type in
+                            Text(type).tag(type)
                         }
                     }
                     
-                    Picker("Current Rank", selection: $presentRank) {
+                    Picker("Present Rank", selection: $presentRank) {
                         Text("Select Rank").tag("")
                         ForEach(ranks, id: \.self) { rank in
                             Text(rank).tag(rank)
                         }
                     }
+                    
+                    TextField("Company", text: $company)
+                        .disabled(true)
+                        .foregroundColor(.secondary)
                 }
                 
-                Button(action: registerUser) {
-                    if isRegistering {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle())
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.gray)
-                            .foregroundColor(.white)
-                            .cornerRadius(10)
+                Section(header: Text("Current Status")) {
+                    Picker("Status", selection: $isOnShip) {
+                        Text("On Land").tag(false)
+                        Text("On Ship").tag(true)
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .padding(.vertical, 5)
+                    
+                    if isOnShip {
+                        // Ship assignment fields
+                        TextField("Ship Name", text: $shipName)
+                        TextField("Port of Joining", text: $portOfJoining)
+                        
+                        Picker("Contract Length (months)", selection: $contractLength) {
+                            ForEach(1...12, id: \.self) { month in
+                                Text("\(month) months").tag(month)
+                            }
+                        }
+                        
+                        DatePicker("Date of Onboard", selection: $dateOfOnboard, displayedComponents: .date)
                     } else {
-                        Text("Register")
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(areAllFieldsFilled ? Color.blue : Color.gray)
-                            .foregroundColor(.white)
-                            .cornerRadius(10)
+                        // Land assignment fields
+                        TextField("Last Vessel", text: $lastVessel)
+                        DatePicker("Date Home", selection: $dateHome, displayedComponents: .date)
+                        DatePicker("Expected Joining Date", selection: $expectedJoiningDate, displayedComponents: .date)
                     }
                 }
-                .disabled(!areAllFieldsFilled || isRegistering)
-                .listRowInsets(EdgeInsets())
-                .padding()
+                
+                Section(header: Text("Security")) {
+                    SecureField("Password", text: $password)
+                    SecureField("Confirm Password", text: $confirmPassword)
+                }
+                
+                Section {
+                    Button(action: register) {
+                        if isRegistering {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle())
+                        } else {
+                            Text("Register")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!areAllFieldsFilled || isRegistering)
+                }
             }
-            .navigationTitle("Seafarer Registration")
+            .navigationTitle("Register")
             .alert(alertMessage, isPresented: $showAlert) {
                 Button("OK", role: .cancel) { }
             }
@@ -123,68 +144,15 @@ struct RegisterView: View {
     }
     
     private var areAllFieldsFilled: Bool {
-        !name.isEmpty && !surname.isEmpty && !email.isEmpty && 
-        !password.isEmpty && !confirmPassword.isEmpty &&
-        !mobileNumber.isEmpty && !fleetWorking.isEmpty && !presentRank.isEmpty &&
-        !company.isEmpty && password == confirmPassword && isValidEmail(email)
-    }
-    
-    private func registerUser() {
-        guard areAllFieldsFilled else {
-            alertMessage = "Please fill in all fields"
-            showAlert = true
-            return
-        }
+        let baseCondition = !name.isEmpty && !surname.isEmpty && !email.isEmpty && 
+            !password.isEmpty && !confirmPassword.isEmpty &&
+            !mobileNumber.isEmpty && !presentRank.isEmpty &&
+            !company.isEmpty && password == confirmPassword && isValidEmail(email)
         
-        isRegistering = true
-        
-        // Create user with Firebase Authentication
-        FirebaseService.shared.signUp(email: email, password: password) { result in
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let user):
-                    // Firebase user created successfully
-                    // Save the user ID for future reference
-                    userId = user.userIdentifier ?? ""
-                    
-                    // Create user data for Firestore
-                    let firebaseUser = User()
-                    firebaseUser.userIdentifier = user.userIdentifier
-                    firebaseUser.name = name
-                    firebaseUser.surname = surname
-                    firebaseUser.email = email
-                    firebaseUser.mobileNumber = mobileNumber
-                    firebaseUser.fleetWorking = fleetWorking
-                    firebaseUser.presentRank = presentRank
-                    firebaseUser.company = company
-                    
-                    // Add to SwiftData
-                    modelContext.insert(firebaseUser)
-                    try? modelContext.save()
-                    
-                    // Save user profile to Firestore
-                    FirebaseService.shared.saveUserProfile(user: firebaseUser) { profileResult in
-                        DispatchQueue.main.async {
-                            isRegistering = false
-                            
-                            switch profileResult {
-                            case .success(_):
-                                // Successfully saved to Firestore
-                                isUserRegistered = true
-                                
-                            case .failure(let error):
-                                alertMessage = "Failed to save profile: \(error.localizedDescription)"
-                                showAlert = true
-                            }
-                        }
-                    }
-                    
-                case .failure(let error):
-                    isRegistering = false
-                    alertMessage = "Registration failed: \(error.localizedDescription)"
-                    showAlert = true
-                }
-            }
+        if isOnShip {
+            return baseCondition && !shipName.isEmpty && !portOfJoining.isEmpty
+        } else {
+            return baseCondition && !lastVessel.isEmpty
         }
     }
     
@@ -193,9 +161,130 @@ struct RegisterView: View {
         let emailPred = NSPredicate(format:"SELF MATCHES %@", emailRegEx)
         return emailPred.evaluate(with: email)
     }
+    
+    private func register() {
+        guard areAllFieldsFilled else { return }
+        
+        isRegistering = true
+        
+        // Create user in Firebase Auth
+        Auth.auth().createUser(withEmail: email, password: password) { result, error in
+            if let error = error {
+                alertMessage = error.localizedDescription
+                showAlert = true
+                isRegistering = false
+                return
+            }
+            
+            guard let user = result?.user else {
+                alertMessage = "Failed to create user"
+                showAlert = true
+                isRegistering = false
+                return
+            }
+            
+            // Create user in SwiftData
+            let newUser = User(
+                name: name,
+                surname: surname,
+                email: email,
+                password: password,
+                mobileNumber: mobileNumber,
+                fleetWorking: selectedFleetType,
+                presentRank: presentRank,
+                company: company
+            )
+            
+            // Set the user's status based on selection
+            newUser.currentStatus = isOnShip ? .onShip : .onLand
+            newUser.userIdentifier = user.uid
+            
+            modelContext.insert(newUser)
+            
+            // Save user profile to Firestore
+            FirebaseService.shared.saveUserProfile(user: newUser) { result in
+                switch result {
+                case .success:
+                    // Create the appropriate assignment based on status
+                    if self.isOnShip {
+                        // Create ship assignment
+                        let shipAssignment = ShipAssignment(
+                            user: newUser,
+                            dateOfOnboard: self.dateOfOnboard,
+                            rank: self.presentRank,
+                            shipName: self.shipName,
+                            company: self.company,
+                            contractLength: self.contractLength,
+                            portOfJoining: self.portOfJoining,
+                            email: self.email,
+                            mobileNumber: self.mobileNumber,
+                            isPublic: true,
+                            fleetWorking: self.selectedFleetType
+                        )
+                        
+                        self.modelContext.insert(shipAssignment)
+                        
+                        // Save to Firebase
+                        FirebaseService.shared.saveShipAssignment(shipAssignment: shipAssignment) { assignmentResult in
+                            DispatchQueue.main.async {
+                                self.isRegistering = false
+                                
+                                switch assignmentResult {
+                                case .success:
+                                    self.userId = user.uid
+                                    self.isUserRegistered = true
+                                case .failure(let error):
+                                    self.alertMessage = "Failed to save ship assignment: \(error.localizedDescription)"
+                                    self.showAlert = true
+                                }
+                            }
+                        }
+                    } else {
+                        // Create land assignment
+                        let landAssignment = LandAssignment(
+                            user: newUser,
+                            dateHome: self.dateHome,
+                            expectedJoiningDate: self.expectedJoiningDate,
+                            fleetType: self.selectedFleetType,
+                            lastVessel: self.lastVessel,
+                            email: self.email,
+                            mobileNumber: self.mobileNumber,
+                            isPublic: true,
+                            company: self.company
+                        )
+                        
+                        self.modelContext.insert(landAssignment)
+                        
+                        // Save to Firebase
+                        FirebaseService.shared.saveLandAssignment(landAssignment: landAssignment) { assignmentResult in
+                            DispatchQueue.main.async {
+                                self.isRegistering = false
+                                
+                                switch assignmentResult {
+                                case .success:
+                                    self.userId = user.uid
+                                    self.isUserRegistered = true
+                                case .failure(let error):
+                                    self.alertMessage = "Failed to save land assignment: \(error.localizedDescription)"
+                                    self.showAlert = true
+                                }
+                            }
+                        }
+                    }
+                    
+                case .failure(let error):
+                    DispatchQueue.main.async {
+                        self.isRegistering = false
+                        self.alertMessage = "Failed to save profile: \(error.localizedDescription)"
+                        self.showAlert = true
+                    }
+                }
+            }
+        }
+    }
 }
 
 #Preview {
     RegisterView()
-        .modelContainer(for: User.self, inMemory: true)
+        .modelContainer(for: [User.self], inMemory: true)
 } 

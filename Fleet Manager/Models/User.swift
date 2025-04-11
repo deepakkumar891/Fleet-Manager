@@ -34,6 +34,9 @@ final class User {
     // New field for company
     var company: String?
     
+    // Photo URL from Firebase Storage
+    var photoURL: String?
+    
     // Empty initializer required for SwiftData
     init() {
         self.id = UUID()
